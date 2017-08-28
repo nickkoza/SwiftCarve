@@ -6,16 +6,18 @@
 #define FOG_RELAY_PIN            7  // OUTPUT
 #define PUMP_RELAY_PIN           8  // OUTPUT
 #define FORWARD_LIGHT_PIN        9  // PWM
-#define SPARK_LIGHT_PIN          10 // PWM
+#define SPARK_LIGHT_PIN_1        10 // PWM
+#define SPARK_LIGHT_PIN_2        11 // PWM
 
-#define PUMP_DURATION_IN_MS      (1000 * 3) // Give the ability to leave the pump on for longer than the fogger, to cool it down and pump out and remaining fog
-#define FOG_COOLDOWN_DELAY_IN_MS (1000 * 5) // Lock out the fog system from running again for a duration, to give it time to cool back down
-#define FOG_DURATION_IN_MS       (1000 * 2) // How long to run the fogger heat coils for
-#define PREHEAT_DELAY_IN_MS      250        // Give the coils a bit to warm up before the air pump enables
+#define PREHEAT_DELAY_IN_MS       250         // Give the coils a bit to warm up before the air pump enables
+#define FOG_DURATION_IN_MS        (1000 * 2)  // How long to run the fogger heat coils for
+#define PUMP_COOLDOWN_DELAY_IN_MS (1000 * 1)  // Leaves the pump on for a little bit while the fogger is off, to help cool it down and pump out any last fog
+#define FOG_COOLDOWN_DELAY_IN_MS  (1000 * 5)  // Lock out the fog system from running again for a duration, to give it time to cool back down
+
 
 class Relay {
 private:
-  const int openState = HIGH;   // Yes, this relay board is reversed from what you'd expect
+  const int openState = HIGH;   // Yes, this relay board is reversed and has a high open
   const int closedState = LOW;
   int pin;
   boolean state;
@@ -30,11 +32,17 @@ public:
   void open() {
     digitalWrite(pin, openState);
     state = openState;
+    Serial.print("RELAY - PIN ");
+    Serial.print(pin);
+    Serial.println(" - Open");
   }
 
   void close() {
     digitalWrite(pin, closedState);
     state = closedState;
+    Serial.print("RELAY - PIN ");
+    Serial.print(pin);
+    Serial.println(" - Close");
   }
 
   boolean isOpen() {
@@ -46,20 +54,29 @@ public:
   }
 };
 
+class LED {
+private:
+  int pin;
+public:
+  LED(int pin) {
+    this->pin = pin;
+    pinMode(pin, OUTPUT);
+    analogWrite(pin, 0);
+  }
+
+  void set(int brightness) {
+    analogWrite(pin, brightness);
+  }
+};
+
 
 class Pump {
 private:
-Relay* relay;
-unsigned long lastStartedAt;
+  Relay *relay;
 
 public:
   Pump(Relay *relay) {
     this->relay = relay;
-    lastStartedAt = 0;
-  }
-
-  boolean canRun() {
-    return isNotRunning() && 
   }
 
   boolean isRunning() {
@@ -72,65 +89,177 @@ public:
 
   void start() {
     relay->close();
+    Serial.println("PUMP - Start");
   }
 
   void shutdown() {
     relay->open();
+    Serial.println("PUMP - Shutdown");
   }
 };
 
+
 class Fogger {
+private:
+  Relay *relay;
+  unsigned long lastShutdownAt;
+  unsigned long startedAt;
+  
 public:
-  Fogger(int relayPin) {
-    pinMode(relayPin, OUTPUT);
-    digitalWrite(relayPin, LOW);
+  Fogger(Relay *relay) {
+    this->relay = relay;
+    lastShutdownAt = 0;
+  }
+
+  void loop() {
+
+    // Make sure to automatically shutdown if we've hit the max run duration
+    if (isRunning() && startedAt + FOG_DURATION_IN_MS) {
+      shutdown();
+    }
+  }
+
+  boolean canRun() {
+    // Make sure we don't turn back on within the cooldown period
+    return isNotRunning() && millis() > lastShutdownAt + FOG_COOLDOWN_DELAY_IN_MS;
   }
 
   boolean isRunning() {
-    
+    relay->isClosed();
+  }
+
+  boolean isNotRunning() {
+    return !isRunning();
   }
 
   boolean start() {
-    
+    if (canRun()) {
+      relay->close();
+      startedAt = millis();
+      Serial.println("FOGGER - Start");
+    }
   }
 
   boolean shutdown() {
-    
+    relay->open();
+    lastShutdownAt = millis();
+    Serial.println("FOGGER - Shutdown");
+  }
+};
+
+class FlickerLight {
+private:
+  LED *led;
+  boolean running;
+
+public:
+  FlickerLight(LED *led) {
+    this->led = led;
+    running = false;
+  }
+
+  void loop() {
+    // TODO
+  }
+
+  void start() {
+    running = true;
+    Serial.print("FLICKERLIGHT - Start");
+  }
+
+  void stop() {
+    running = true;
+    Serial.print("FLICKERLIGHT - Stop");
   }
 };
 
 class Show {
-  unsigned long startTime;
-  boolean showRunning;
+private:
+  enum State {
+    STOPPED = 0,
+    WARM_UP = 1,
+    FOGGING = 2,
+    COOL_DOWN = 3
+  };
+  
+  unsigned long stateEntryTime;
   Fogger *fogger;
   Pump *pump;
+  FlickerLight *sparkLight1;
+  FlickerLight *sparkLight2;
+  State state;
+
+  void goToState(State newState) {
+    state = newState;
+    stateEntryTime = millis();
+    Serial.print("SHOW - went to state ");
+    Serial.print(newState);
+    Serial.println("");
+  }
 
 public:
-  Show(Fogger *fogger, Pump *pump, int sparkLightPin) {
+  Show(Fogger *fogger, Pump *pump, FlickerLight *sparkLight1, FlickerLight *sparkLight2) {
     this->fogger = fogger;
     this->pump = pump;
-    pinMode(sparkLightPin, OUTPUT);
-    analogWrite(sparkLightPin, 0);
+    this->sparkLight1 = sparkLight1;
+    this->sparkLight2 = sparkLight2;
+    state = STOPPED;
+    stateEntryTime = 0;
   }
   
   void attemptToStartShow() {
     unsigned long currentTime = millis();
-    if (!showRunning && currentTime > startTime + PREHEAT_DELAY_IN_MS + PUMP_DURATION_IN_MS + FOG_COOLDOWN_DELAY_IN_MS) {
-      showRunning = true;
-      startTime = currentTime;
+    if (state == STOPPED && fogger->canRun()) {
+      state = WARM_UP;
+      stateEntryTime = currentTime;
+      fogger->start();
+      sparkLight1->start();
+      sparkLight2->start();
     }
   }
 
-  void stepShow() {
-    
+  void loop() {
+    fogger->loop();
+    sparkLight1->loop();
+    sparkLight2->loop();
+
+    unsigned long currentTime = millis();
+    if (state == WARM_UP && currentTime > stateEntryTime + PREHEAT_DELAY_IN_MS) {
+      goToState(FOGGING);
+      pump->start();
+    }
+    else if (state == FOGGING && currentTime > stateEntryTime + FOG_DURATION_IN_MS) {
+      goToState(COOL_DOWN);
+      stateEntryTime = currentTime;
+      fogger->shutdown();
+    }
+    else if (state == COOL_DOWN && currentTime > stateEntryTime + PUMP_COOLDOWN_DELAY_IN_MS) {
+      goToState(STOPPED);
+      pump->shutdown();
+      sparkLight1->stop();
+      sparkLight2->stop();
+    }
   }
 };
 
+
+FlickerLight *forwardLight;
+Show *show;
+
 void setup() {
+  Serial.begin(9600);
   
+  forwardLight = new FlickerLight(new LED(FORWARD_LIGHT_PIN));
+
+  show = new Show(
+    new Fogger(new Relay(FOG_RELAY_PIN)),
+    new Pump(new Relay(PUMP_RELAY_PIN)),
+    new FlickerLight(new LED(SPARK_LIGHT_PIN_1)),
+    new FlickerLight(new LED(SPARK_LIGHT_PIN_2))
+  );
 }
 
 void loop() {
-  
-
+  show->loop();
+  forwardLight->loop();
 }
