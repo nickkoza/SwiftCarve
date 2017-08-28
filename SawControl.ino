@@ -14,6 +14,10 @@
 #define PUMP_COOLDOWN_DELAY_IN_MS (1000 * 1)  // Leaves the pump on for a little bit while the fogger is off, to help cool it down and pump out any last fog
 #define FOG_COOLDOWN_DELAY_IN_MS  (1000 * 5)  // Lock out the fog system from running again for a duration, to give it time to cool back down
 
+struct IntRange {
+  int min;
+  int max;
+};
 
 class Relay {
 private:
@@ -147,14 +151,27 @@ public:
   }
 };
 
+typedef IntRange BrightnessRange;
+typedef IntRange IdleDurationRange;
+typedef IntRange TransitionDurationRange;
+typedef IntRange SustainDurationRange;
+
 class FlickerLight {
 private:
   LED *led;
   boolean running;
+  BrightnessRange brightness;
+  IdleDurationRange idleDuration;
+  TransitionDurationRange transitionDuration;
+  SustainDurationRange sustainDuration;
 
 public:
-  FlickerLight(LED *led) {
+  FlickerLight(LED *led, BrightnessRange brightness, IdleDurationRange idleDuration,  TransitionDurationRange transitionDuration, SustainDurationRange sustainDuration) {
     this->led = led;
+    this->brightness = brightness;
+    this->idleDuration = idleDuration; 
+    this->transitionDuration = transitionDuration;
+    this->sustainDuration = sustainDuration;
     running = false;
   }
 
@@ -179,7 +196,7 @@ private:
     STOPPED = 0,
     WARM_UP = 1,
     FOGGING = 2,
-    COOL_DOWN = 3
+    COOLDOWN = 3
   };
   
   unsigned long stateEntryTime;
@@ -210,8 +227,7 @@ public:
   void attemptToStartShow() {
     unsigned long currentTime = millis();
     if (state == STOPPED && fogger->canRun()) {
-      state = WARM_UP;
-      stateEntryTime = currentTime;
+      goToState(WARM_UP);
       fogger->start();
       sparkLight1->start();
       sparkLight2->start();
@@ -229,11 +245,10 @@ public:
       pump->start();
     }
     else if (state == FOGGING && currentTime > stateEntryTime + FOG_DURATION_IN_MS) {
-      goToState(COOL_DOWN);
-      stateEntryTime = currentTime;
+      goToState(COOLDOWN);
       fogger->shutdown();
     }
-    else if (state == COOL_DOWN && currentTime > stateEntryTime + PUMP_COOLDOWN_DELAY_IN_MS) {
+    else if (state == COOLDOWN && currentTime > stateEntryTime + PUMP_COOLDOWN_DELAY_IN_MS) {
       goToState(STOPPED);
       pump->shutdown();
       sparkLight1->stop();
@@ -248,14 +263,47 @@ Show *show;
 
 void setup() {
   Serial.begin(9600);
+
+  BrightnessRange forwardBrightness;
+  forwardBrightness.min = 200;
+  forwardBrightness.max = 255;
+
+  IdleDurationRange forwardIdleDuration;
+  forwardIdleDuration.min = 250;
+  forwardIdleDuration.max = 2500;
   
-  forwardLight = new FlickerLight(new LED(FORWARD_LIGHT_PIN));
+  TransitionDurationRange forwardTransitionDuration;
+  forwardTransitionDuration.min = 250;
+  forwardTransitionDuration.max = 2000;
+  
+  SustainDurationRange forwardSustainDuration;
+  forwardSustainDuration.min = 250;
+  forwardSustainDuration.max = 2500;
+  forwardLight = new FlickerLight(new LED(FORWARD_LIGHT_PIN), forwardBrightness, forwardIdleDuration, forwardTransitionDuration, forwardSustainDuration);
+  forwardLight.start();
+
+
+  BrightnessRange flickerBrightness;
+  flickerBrightness.min = 0;
+  flickerBrightness.max = 255;
+
+  IdleDurationRange flickerIdleDuration;
+  flickerIdleDuration.min = 250;
+  flickerIdleDuration.max = 1000;
+  
+  TransitionDurationRange flickerTransitionDuration;
+  flickerTransitionDuration.min = 1;
+  flickerTransitionDuration.max = 5;
+  
+  SustainDurationRange flickerSustainDuration;
+  flickerSustainDuration.min = 20;
+  flickerSustainDuration.max = 35;
 
   show = new Show(
     new Fogger(new Relay(FOG_RELAY_PIN)),
     new Pump(new Relay(PUMP_RELAY_PIN)),
-    new FlickerLight(new LED(SPARK_LIGHT_PIN_1)),
-    new FlickerLight(new LED(SPARK_LIGHT_PIN_2))
+    new FlickerLight(new LED(SPARK_LIGHT_PIN_1), flickerBrightness, flickerIdleDuration, flickerTransitionDuration, flickerSustainDuration),
+    new FlickerLight(new LED(SPARK_LIGHT_PIN_2), flickerBrightness, flickerIdleDuration, flickerTransitionDuration, flickerSustainDuration)
   );
 }
 
