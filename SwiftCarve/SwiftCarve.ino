@@ -1,17 +1,18 @@
 // Written by Nicholas Koza
 // All rights reserved. Not for redistribution or use without permission.
-#define SHOW_TRIGGER_PIN         4  // INPUT. The fog, the pump, and the spark lights are together known as "show"
-#define MOTOR_TRIGGER_PIN        5  // INPUT
-#define MOTOR_RELAY_PIN          6  // OUTPUT
-#define FOG_RELAY_PIN            7  // OUTPUT
-#define PUMP_RELAY_PIN           8  // OUTPUT
-#define FORWARD_LIGHT_PIN        9  // PWM
-#define SPARK_LIGHT_PIN_1        10 // PWM
-#define SPARK_LIGHT_PIN_2        11 // PWM
+#include "Relay.h"
+#define SHOW_TRIGGER_PIN         23 // INPUT. The fog, the pump, and the spark lights are together known as "show"
+#define MOTOR_TRIGGER_PIN        24 // INPUT
+#define MOTOR_RELAY_PIN          8  // OUTPUT
+#define FOG_RELAY_PIN            6  // OUTPUT
+#define PUMP_RELAY_PIN           2  // OUTPUT
+#define FORWARD_LIGHT_PIN        3  // PWM
+#define SPARK_LIGHT_PIN_1        5  // PWM
+#define SPARK_LIGHT_PIN_2        9  // PWM
 
-#define PREHEAT_DELAY_IN_MS       250         // Give the coils a bit to warm up before the air pump enables
-#define FOG_DURATION_IN_MS        (1000 * 2)  // How long to run the fogger heat coils for
-#define PUMP_COOLDOWN_DELAY_IN_MS (1000 * 1)  // Leaves the pump on for a little bit while the fogger is off, to help cool it down and pump out any last fog
+#define PREHEAT_DELAY_IN_MS       500         // Give the coils a bit to warm up before the air pump enables
+#define FOG_DURATION_IN_MS        (1000 * 1)  // How long to run the fogger heat coils for
+#define PUMP_COOLDOWN_DELAY_IN_MS (1000 * 3)  // Leaves the pump on for a little bit while the fogger is off, to help cool it down and pump out any last fog
 #define FOG_COOLDOWN_DELAY_IN_MS  (1000 * 5)  // Lock out the fog system from running again for a duration, to give it time to cool back down
 
 struct IntRange {
@@ -19,44 +20,6 @@ struct IntRange {
   int max;
 };
 
-class Relay {
-private:
-  const int openState = HIGH;   // Yes, this relay board is reversed and has a high open
-  const int closedState = LOW;
-  int pin;
-  boolean state;
-public:
-  Relay(int pin) {
-    this->pin = pin;
-    pinMode(pin, OUTPUT);
-    digitalWrite(pin, openState);
-    state = openState;
-  }
-
-  void open() {
-    digitalWrite(pin, openState);
-    state = openState;
-    Serial.print("RELAY - PIN ");
-    Serial.print(pin);
-    Serial.println(" - Open");
-  }
-
-  void close() {
-    digitalWrite(pin, closedState);
-    state = closedState;
-    Serial.print("RELAY - PIN ");
-    Serial.print(pin);
-    Serial.println(" - Close");
-  }
-
-  boolean isOpen() {
-    return state == openState;
-  }
-
-  boolean isClosed() {
-    return state == closedState;
-  }
-};
 
 class LED {
 private:
@@ -158,12 +121,26 @@ typedef IntRange SustainDurationRange;
 
 class FlickerLight {
 private:
+  enum State {
+    STOPPED = 0,
+    IDLING = 1,
+    TRANSITION_UP = 2,
+    SUSTAIN = 3,
+    TRANSITION_DOWN = 4
+  };
+
   LED *led;
-  boolean running;
+  unsigned long stateEntryTime;
+  State state;
   BrightnessRange brightness;
   IdleDurationRange idleDuration;
   TransitionDurationRange transitionDuration;
   SustainDurationRange sustainDuration;
+
+  int currentIdle;
+  int currentBrightness;
+  int currentTransition;
+  int currentSustain;
 
 public:
   FlickerLight(LED *led, BrightnessRange brightness, IdleDurationRange idleDuration,  TransitionDurationRange transitionDuration, SustainDurationRange sustainDuration) {
@@ -172,21 +149,70 @@ public:
     this->idleDuration = idleDuration; 
     this->transitionDuration = transitionDuration;
     this->sustainDuration = sustainDuration;
-    running = false;
+    goToState(STOPPED);
   }
 
   void loop() {
-    // TODO
+    unsigned long currentTime = millis();
+    
+    if (state == STOPPED) {
+      led->set(0);
+    }
+    else if (state == IDLING) {
+      led->set(brightness.min);
+      if (currentTime > stateEntryTime + currentIdle) {
+        goToState(TRANSITION_UP);
+      }
+    }
+    else if (state == TRANSITION_UP) {
+      float transitionBrightness = ((float)currentTime - (float)stateEntryTime) / (float)currentTransition;
+      led->set(brightness.min + ((float)brightness.max - (float)brightness.min) * transitionBrightness);
+      if (currentTime > stateEntryTime + currentTransition) {
+        goToState(SUSTAIN);
+      }
+    }
+    else if (state == SUSTAIN) {
+      led->set(brightness.max);
+      if (currentTime > stateEntryTime + currentSustain) {
+        goToState(TRANSITION_DOWN);
+      }
+    }
+    else if (state == TRANSITION_DOWN) {
+      float transitionBrightness = 1.f - (((float)currentTime - (float)stateEntryTime) / (float)currentTransition);
+      led->set(brightness.min + ((float)brightness.max - (float)brightness.min) * transitionBrightness);
+      if (currentTime > stateEntryTime + currentTransition) {
+        goToState(IDLING);
+      }
+    }
+  }
+
+  void goToState(State newState) {
+    state = newState;
+    stateEntryTime = millis();
+
+    if (state == IDLING) {
+      currentIdle = random(idleDuration.min, idleDuration.max);
+    }
+    else if(state == TRANSITION_UP || state == TRANSITION_DOWN) {
+      currentTransition = random(transitionDuration.min, transitionDuration.max);
+    }
+    else if(state == SUSTAIN) {
+      currentSustain = random(sustainDuration.min, sustainDuration.max);
+    }
+    
+    //Serial.print("FLICKERLIGHT - went to state ");
+    //Serial.print(newState);
+    //Serial.println("");
   }
 
   void start() {
-    running = true;
-    Serial.print("FLICKERLIGHT - Start");
+    goToState(IDLING);
+    Serial.println("FLICKERLIGHT - Start");
   }
 
   void stop() {
-    running = true;
-    Serial.print("FLICKERLIGHT - Stop");
+    goToState(STOPPED);
+    Serial.println("FLICKERLIGHT - Stop");
   }
 };
 
@@ -220,6 +246,10 @@ public:
     this->pump = pump;
     this->sparkLight1 = sparkLight1;
     this->sparkLight2 = sparkLight2;
+    sparkLight1->stop();
+    sparkLight2->stop();
+    //sparkLight1->start();
+    //sparkLight2->start();
     state = STOPPED;
     stateEntryTime = 0;
   }
@@ -229,8 +259,6 @@ public:
     if (state == STOPPED && fogger->canRun()) {
       goToState(WARM_UP);
       fogger->start();
-      sparkLight1->start();
-      sparkLight2->start();
     }
   }
 
@@ -242,6 +270,8 @@ public:
     unsigned long currentTime = millis();
     if (state == WARM_UP && currentTime > stateEntryTime + PREHEAT_DELAY_IN_MS) {
       goToState(FOGGING);
+      sparkLight1->start();
+      sparkLight2->start();
       pump->start();
     }
     else if (state == FOGGING && currentTime > stateEntryTime + FOG_DURATION_IN_MS) {
@@ -260,12 +290,18 @@ public:
 
 FlickerLight *forwardLight;
 Show *show;
+Relay *motor;
+unsigned long lastOutputTime;
 
 void setup() {
   Serial.begin(9600);
+  lastOutputTime = millis();
+
+  motor = new Relay(MOTOR_RELAY_PIN);
+  motor->open();
 
   BrightnessRange forwardBrightness;
-  forwardBrightness.min = 200;
+  forwardBrightness.min = 100;
   forwardBrightness.max = 255;
 
   IdleDurationRange forwardIdleDuration;
@@ -280,7 +316,7 @@ void setup() {
   forwardSustainDuration.min = 250;
   forwardSustainDuration.max = 2500;
   forwardLight = new FlickerLight(new LED(FORWARD_LIGHT_PIN), forwardBrightness, forwardIdleDuration, forwardTransitionDuration, forwardSustainDuration);
-  forwardLight.start();
+  forwardLight->start();
 
 
   BrightnessRange flickerBrightness;
@@ -289,15 +325,15 @@ void setup() {
 
   IdleDurationRange flickerIdleDuration;
   flickerIdleDuration.min = 250;
-  flickerIdleDuration.max = 1000;
+  flickerIdleDuration.max = 1250;
   
   TransitionDurationRange flickerTransitionDuration;
-  flickerTransitionDuration.min = 1;
-  flickerTransitionDuration.max = 5;
+  flickerTransitionDuration.min = 20;
+  flickerTransitionDuration.max = 50;
   
   SustainDurationRange flickerSustainDuration;
   flickerSustainDuration.min = 20;
-  flickerSustainDuration.max = 35;
+  flickerSustainDuration.max = 50;
 
   show = new Show(
     new Fogger(new Relay(FOG_RELAY_PIN)),
@@ -305,9 +341,30 @@ void setup() {
     new FlickerLight(new LED(SPARK_LIGHT_PIN_1), flickerBrightness, flickerIdleDuration, flickerTransitionDuration, flickerSustainDuration),
     new FlickerLight(new LED(SPARK_LIGHT_PIN_2), flickerBrightness, flickerIdleDuration, flickerTransitionDuration, flickerSustainDuration)
   );
+
+  //pinMode(SHOW_TRIGGER_PIN, INPUT);
+  pinMode(SHOW_TRIGGER_PIN, INPUT_PULLUP);
+  pinMode(MOTOR_TRIGGER_PIN, INPUT_PULLUP);
 }
 
 void loop() {
+  if (digitalRead(SHOW_TRIGGER_PIN) == LOW) {
+    Serial.println("SHOW TRIGGER PIN LOW");
+    show->attemptToStartShow();
+  }
+
+  if (digitalRead(MOTOR_TRIGGER_PIN) == LOW) {
+    Serial.println("MOTOR TRIGGER PIN LOW");
+    if (motor->isOpen()) {
+      motor->close();
+    }
+  }
+  else {
+    if (motor->isClosed()) {
+      motor->open();
+    }
+  }
+  
   show->loop();
   forwardLight->loop();
 }
