@@ -1,10 +1,17 @@
 // Written by Nicholas Koza
 // All rights reserved. Not for redistribution or use without permission.
+#include <pcmRF.h>
+#include <pcmConfig.h>
+#include "SD.h"
+#define SD_ChipSelectPin 4
+#include "TMRpcm.h"
+#include "SPI.h"
+
 #include "Relay.h"
-#define SHOW_TRIGGER_PIN         23 // INPUT. The fog, the pump, and the spark lights are together known as "show"
-#define MOTOR_TRIGGER_PIN        24 // INPUT
+#define SHOW_TRIGGER_PIN         14 // INPUT. The fog, the pump, and the spark lights are together known as "show"
+#define MOTOR_TRIGGER_PIN        15 // INPUT
 #define MOTOR_RELAY_PIN          8  // OUTPUT
-#define FOG_RELAY_PIN            6  // OUTPUT
+#define FOG_RELAY_PIN            7  // OUTPUT
 #define PUMP_RELAY_PIN           2  // OUTPUT
 #define FORWARD_LIGHT_PIN        3  // PWM
 #define SPARK_LIGHT_PIN_1        5  // PWM
@@ -150,6 +157,8 @@ public:
     this->transitionDuration = transitionDuration;
     this->sustainDuration = sustainDuration;
     goToState(STOPPED);
+
+	
   }
 
   void loop() {
@@ -265,7 +274,7 @@ public:
   void loop() {
     fogger->loop();
     sparkLight1->loop();
-    sparkLight2->loop();
+    //sparkLight2->loop(); // This is causing an issue with the audio. I suspect they're sharing the same interupt.
 
     unsigned long currentTime = millis();
     if (state == WARM_UP && currentTime > stateEntryTime + PREHEAT_DELAY_IN_MS) {
@@ -291,80 +300,108 @@ public:
 FlickerLight *forwardLight;
 Show *show;
 Relay *motor;
+TMRpcm *audio;
 unsigned long lastOutputTime;
 
 void setup() {
-  Serial.begin(9600);
-  lastOutputTime = millis();
+	Serial.begin(9600);
+	lastOutputTime = millis();
 
-  motor = new Relay(MOTOR_RELAY_PIN);
-  motor->open();
+	motor = new Relay(MOTOR_RELAY_PIN);
+	motor->open();
 
-  BrightnessRange forwardBrightness;
-  forwardBrightness.min = 100;
-  forwardBrightness.max = 255;
+	BrightnessRange forwardBrightness;
+	forwardBrightness.min = 100;
+	forwardBrightness.max = 255;
 
-  IdleDurationRange forwardIdleDuration;
-  forwardIdleDuration.min = 250;
-  forwardIdleDuration.max = 2500;
-  
-  TransitionDurationRange forwardTransitionDuration;
-  forwardTransitionDuration.min = 250;
-  forwardTransitionDuration.max = 2000;
-  
-  SustainDurationRange forwardSustainDuration;
-  forwardSustainDuration.min = 250;
-  forwardSustainDuration.max = 2500;
-  forwardLight = new FlickerLight(new LED(FORWARD_LIGHT_PIN), forwardBrightness, forwardIdleDuration, forwardTransitionDuration, forwardSustainDuration);
-  forwardLight->start();
+	IdleDurationRange forwardIdleDuration;
+	forwardIdleDuration.min = 250;
+	forwardIdleDuration.max = 2500;
+
+	TransitionDurationRange forwardTransitionDuration;
+	forwardTransitionDuration.min = 250;
+	forwardTransitionDuration.max = 2000;
+
+	SustainDurationRange forwardSustainDuration;
+	forwardSustainDuration.min = 250;
+	forwardSustainDuration.max = 2500;
+	forwardLight = new FlickerLight(new LED(FORWARD_LIGHT_PIN), forwardBrightness, forwardIdleDuration, forwardTransitionDuration, forwardSustainDuration);
+	forwardLight->start();
 
 
-  BrightnessRange flickerBrightness;
-  flickerBrightness.min = 0;
-  flickerBrightness.max = 255;
+	BrightnessRange flickerBrightness;
+	flickerBrightness.min = 0;
+	flickerBrightness.max = 255;
 
-  IdleDurationRange flickerIdleDuration;
-  flickerIdleDuration.min = 250;
-  flickerIdleDuration.max = 1250;
-  
-  TransitionDurationRange flickerTransitionDuration;
-  flickerTransitionDuration.min = 20;
-  flickerTransitionDuration.max = 50;
-  
-  SustainDurationRange flickerSustainDuration;
-  flickerSustainDuration.min = 20;
-  flickerSustainDuration.max = 50;
+	IdleDurationRange flickerIdleDuration;
+	flickerIdleDuration.min = 250;
+	flickerIdleDuration.max = 1250;
 
-  show = new Show(
-    new Fogger(new Relay(FOG_RELAY_PIN)),
-    new Pump(new Relay(PUMP_RELAY_PIN)),
-    new FlickerLight(new LED(SPARK_LIGHT_PIN_1), flickerBrightness, flickerIdleDuration, flickerTransitionDuration, flickerSustainDuration),
-    new FlickerLight(new LED(SPARK_LIGHT_PIN_2), flickerBrightness, flickerIdleDuration, flickerTransitionDuration, flickerSustainDuration)
-  );
+	TransitionDurationRange flickerTransitionDuration;
+	flickerTransitionDuration.min = 20;
+	flickerTransitionDuration.max = 50;
 
-  //pinMode(SHOW_TRIGGER_PIN, INPUT);
-  pinMode(SHOW_TRIGGER_PIN, INPUT_PULLUP);
-  pinMode(MOTOR_TRIGGER_PIN, INPUT_PULLUP);
+	SustainDurationRange flickerSustainDuration;
+	flickerSustainDuration.min = 20;
+	flickerSustainDuration.max = 50;
+
+	show = new Show(
+		new Fogger(new Relay(FOG_RELAY_PIN)),
+		new Pump(new Relay(PUMP_RELAY_PIN)),
+		new FlickerLight(new LED(SPARK_LIGHT_PIN_1), flickerBrightness, flickerIdleDuration, flickerTransitionDuration, flickerSustainDuration),
+		new FlickerLight(new LED(SPARK_LIGHT_PIN_2), flickerBrightness, flickerIdleDuration, flickerTransitionDuration, flickerSustainDuration)
+	);
+
+	pinMode(SHOW_TRIGGER_PIN, INPUT);
+	pinMode(MOTOR_TRIGGER_PIN, INPUT);
+
+	if (SD.begin(SD_ChipSelectPin)) {
+		Serial.println("Booting up audio");
+		audio = new TMRpcm();
+		audio->speakerPin = 9;
+	}
+	else {
+		audio = NULL;
+		Serial.println("Could not get SD card. Not initializing audio.");
+		return;   // don't do anything more if not
+	}
+	
+	if (audio != NULL) {
+		audio->play("6.wav");
+		delay(1000);
+		audio->play("6.wav");
+	}
 }
 
 void loop() {
-  if (digitalRead(SHOW_TRIGGER_PIN) == LOW) {
-    Serial.println("SHOW TRIGGER PIN LOW");
-    show->attemptToStartShow();
-  }
+	/*show->attemptToStartShow();
+	if (motor->isOpen()) {
+		motor->close();
+	}*/
 
-  if (digitalRead(MOTOR_TRIGGER_PIN) == LOW) {
-    Serial.println("MOTOR TRIGGER PIN LOW");
-    if (motor->isOpen()) {
-      motor->close();
-    }
-  }
-  else {
-    if (motor->isClosed()) {
-      motor->open();
-    }
-  }
+	if (audio != NULL) {
+		if (!audio->isPlaying()) {
+			audio->play("4.wav");
+		}
+	}
+
+	if (digitalRead(SHOW_TRIGGER_PIN) == HIGH) {
+	Serial.println("SHOW TRIGGER PIN HIGH");
+	show->attemptToStartShow();
+	}
+
+	/*if (digitalRead(MOTOR_TRIGGER_PIN) == HIGH) {
+	Serial.println("MOTOR TRIGGER PIN HIGH");
+	if (motor->isOpen()) {
+		motor->close();
+	}
+	}
+	else {
+	if (motor->isClosed()) {
+		motor->open();
+	}
+	}*/
   
-  show->loop();
-  forwardLight->loop();
+	show->loop();
+	forwardLight->loop();
 }
