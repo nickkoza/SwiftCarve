@@ -15,6 +15,8 @@ Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "Test", "Test\Test.vcxproj",
 EndProject
 Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "SwiftSawTest", "SwiftSawTest\SwiftSawTest.vcxproj", "{810089CC-3522-49A2-A8F4-98091937DC99}"
 EndProject
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "TMRpcm-master", "..\..\..\..\Documents\Arduino\libraries\TMRpcm-master\TMRpcm-master.vcxitems", "{83D028E7-5385-4A03-97FE-3C9167863739}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|x64 = Debug|x64
