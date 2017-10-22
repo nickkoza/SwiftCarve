@@ -28,8 +28,6 @@ Show::Show(Fogger *fogger, Pump *pump, FlickerLight *sparkLight1, FlickerLight *
     this->audioPlayer = audioPlayer;
     sparkLight1->stop();
     sparkLight2->stop();
-    //sparkLight1->start();
-    //sparkLight2->start();
     state = STOPPED;
     stateEntryTime = 0;
 }
@@ -47,7 +45,7 @@ void Show::attemptToStartShow() {
     if (state == STOPPED && fogger->canRun()) {
         goToState(WARM_UP);
         fogger->start();
-        //audioPlayer->playLooped("SPARK");
+        audioPlayer->playLooped("SPARKING.wav");
     }
 }
 

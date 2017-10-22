@@ -89,9 +89,6 @@ void setup() {
 }
 
 void loop() {
-    //audioPlayer->playLoopedIfSilent("SUSTAIN");
-    //audioPlayer->playIfSilent("SUSTAIN.wav");
-
 	if (digitalRead(SHOW_TRIGGER_PIN) == HIGH) {
 	    Serial.println("SHOW TRIGGER PIN HIGH");
 	    show->attemptToStartShow();
@@ -118,6 +115,6 @@ void loop() {
 	    }
 	}
   
-	//show->loop();
-	//forwardLight->loop();
+	show->loop();
+	forwardLight->loop();
 }
