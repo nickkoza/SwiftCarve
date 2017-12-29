@@ -40,7 +40,7 @@ void setup() {
 	motor->open();
 
 	BrightnessRange forwardBrightness;
-	forwardBrightness.min = 100;
+	forwardBrightness.min = 255;
 	forwardBrightness.max = 255;
 
 	IdleDurationRange forwardIdleDuration;

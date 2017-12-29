@@ -21,8 +21,8 @@ along with this program.If not, see <http://www.gnu.org/licenses/>.
 #define _CONFIG_h
 
 #define PREHEAT_DELAY_IN_MS       500         // Give the coils a bit to warm up before the air pump enables
-#define FOG_DURATION_IN_MS        (1000 * 1)  // How long to run the fogger heat coils for
-#define PUMP_COOLDOWN_DELAY_IN_MS (1000 * 3)  // Leaves the pump on for a little bit while the fogger is off, to help cool it down and pump out any last fog
+#define FOG_DURATION_IN_MS        (750)  // How long to run the fogger heat coils for
+#define PUMP_COOLDOWN_DELAY_IN_MS (1000)  // Leaves the pump on for a little bit while the fogger is off, to help cool it down and pump out any last fog
 #define FOG_COOLDOWN_DELAY_IN_MS  (1000 * 5)  // Lock out the fog system from running again for a duration, to give it time to cool back down
 
 #define SANDISK_CHIP_SELECT_PIN  4
